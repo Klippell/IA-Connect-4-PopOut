@@ -113,21 +113,41 @@ def save_move_to_dataset(game_state, move, filename):
             writer.writerow(headers)
         writer.writerow(row)
 
-def run_batch_simulation(num_games, ia_1, ia_2, batch_label):
-    """Executa jogos PC vs PC em segundo plano para encher o dataset."""
-    filename = f"batch_{batch_label}_P1_it{ia_1.iterations}_vs_P2_it{ia_2.iterations}.csv"
-    print(f"\n[SISTEMA] A gerar lote: {batch_label}...")
+def run_batch_simulation(num_games, ia_1, ia_2):
+    """Executa jogos PC vs PC e gera o nome do ficheiro na pasta datasets."""
+    
+    # 1. Garante que a pasta 'datasets' existe na raiz do projeto
+    os.makedirs("datasets", exist_ok=True)
+    
+    # 2. Extrai as configurações (Iterações, C, e Limite de filhos)
+    mc1 = ia_1.max_children if ia_1.max_children is not None else 7
+    mc2 = ia_2.max_children if ia_2.max_children is not None else 7
+    
+    config_p1 = f"P1_it{ia_1.iterations}_c{ia_1.c}_mc{mc1}"
+    config_p2 = f"P2_it{ia_2.iterations}_c{ia_2.c}_mc{mc2}"
+    
+    # 3. Cria o nome do ficheiro final DENTRO da pasta datasets
+    filename = f"datasets/{config_p1}_vs_{config_p2}.csv"
+    
+    print(f"\n[SISTEMA] A gerar lote de {num_games} jogos...")
+    print(f"[ARQUIVO] {filename}")
+    
     for i in range(num_games):
         game = PopOutGame()
         while True:
             curr_ia = ia_1 if game.current_player == PLAYER1 else ia_2
             move = curr_ia.search(game)
             if move is None: break 
+            
             save_move_to_dataset(game, move, filename)
+            
             if move[1] == 'd': game.drop_piece(move[0], game.current_player)
             else: game.pop_piece(move[0], game.current_player)
+            
             if game.check_winner_after_move(game.current_player): break
+            
             game.current_player = 2 if game.current_player == 1 else 1
+            
         print(f"> Jogo {i+1}/{num_games} guardado.")
 
 # =================================================================
