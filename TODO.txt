@@ -1,0 +1,25 @@
+================================================================================
+OBSERVAÇÕES E MELHORIAS FUTURAS: PROJETO POPOUT IA
+================================================================================
+
+1. REQUISITO: HEURÍSTICA DE DOMÍNIO (1-PLY LOOKAHEAD)
+--------------------------------------------------------------------------------
+- Objetivo: Melhorar a fase de 'Rollout' do MCTS (atualmente aleatória).
+- Onde: Implementar no 'src/mcts.py'e 'src/game.py' dentro da função de simulação.
+- Como funciona: 
+    * Antes de escolher uma jogada ao calhas, a IA deve "olhar" se existe
+      uma vitória imediata ou uma ameaça fatal.
+    * Prioridade 1: Atacar (Se uma jogada 'Drop' ou 'Pop' ganha o jogo, fazê-la).
+    * Prioridade 2: Defender (Se o adversário ganha na próxima jogada, bloqueá-lo).
+
+2. DETALHE TÉCNICO DO 'POP' (MUITO IMPORTANTE)
+--------------------------------------------------------------------------------
+- O 'Pop' não é apenas tirar uma peça; ele altera a gravidade da coluna.
+- Ao simular o 1-ply, verificar se a descida das peças completa um 4-em-linha.
+- Vantagem: A IA para de perder jogos "ganhos" por causa da aleatoriedade do MCTS.
+
+3. NOTAS DO PROF. RENNA
+--------------------------------------------------------------------------------
+- Validar se a eficiência computacional compensa (Spoiler: Sim, testar 
+  14 estados é quase instantâneo em Python/NumPy).
+================================================================================

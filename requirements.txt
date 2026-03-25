@@ -1,0 +1,13 @@
+
+# DEPENDÊNCIAS DO PROJETO: POPOUT CONNECT-4
+
+# Core e Estruturas de Dados
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Visualização de Dados
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Utilitários e Ambiente
+jupyter>=1.0.0
