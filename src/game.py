@@ -27,22 +27,46 @@ class PopOutGame:
         key = self.get_state_key()
         self.state_history[key] = self.state_history.get(key, 0) + 1
 
-    def drop_piece(self, col, piece):
+    def drop_piece(self, col, piece, record=True):
         for r in range(ROWS-1, -1, -1):
             if self.board[r][col] == EMPTY:
                 self.board[r][col] = piece 
-                self._record_state()
+                if record: self._record_state()
                 return True
         return False 
 
-    def pop_piece(self, col, piece):
+    def pop_piece(self, col, piece, record=True):
         if self.board[ROWS-1][col] == piece:
             for r in range(ROWS-1, 0, -1):
                 self.board[r][col] = self.board[r-1][col]
             self.board[0][col] = EMPTY
-            self._record_state()
+            if record: self._record_state()
             return True
         return False
+
+    def get_winning_move(self, player):
+        """Verifica se há alguma jogada de vitória imediata para 'player' (1-Ply Lookahead)."""
+        board_full = self.is_board_full()
+        original_board = np.copy(self.board)
+        
+        for col in range(COLS):
+            # Testar DROP
+            if not board_full and self.board[0][col] == EMPTY:
+                self.drop_piece(col, player, record=False)
+                if self.check_win(player):
+                    self.board = np.copy(original_board)
+                    return (col, 'd')
+                self.board = np.copy(original_board)
+                
+            # Testar POP
+            if self.board[ROWS-1][col] == player:
+                self.pop_piece(col, player, record=False)
+                if self.check_win(player):
+                    self.board = np.copy(original_board)
+                    return (col, 'p')
+                self.board = np.copy(original_board)
+                
+        return None
 
     def check_win(self, piece):
         for c in range(COLS-3):

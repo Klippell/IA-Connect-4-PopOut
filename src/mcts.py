@@ -46,6 +46,19 @@ class MCTS:
 
     def search(self, initial_state):
         """Inicia a procura da melhor jogada."""
+        p_current = initial_state.current_player
+        p_opponent = 2 if p_current == 1 else 1
+
+        # 1-Ply Lookahead na Raiz: Garante ataque ou defesa imediata antes de simular
+        m_win = initial_state.get_winning_move(p_current)
+        if m_win is not None:
+            return m_win
+            
+        m_defend = initial_state.get_winning_move(p_opponent)
+        if m_defend is not None:
+            # Para bloquear o oponente, o mais provável/seguro é um drop na mesma coluna
+            return (m_defend[0], 'd')
+
         root = Node(state=initial_state.clone())
 
         for _ in range(self.iterations):
@@ -91,7 +104,7 @@ class MCTS:
         return child
 
     def _simulate(self, state):
-        """Joga aleatoriamente até ao fim para avaliar o potencial do nó."""
+        """Joga (guiado por heurística de 1-ply) até ao fim para avaliar o nó."""
         temp_state = state.clone()
         while True:
             # Verifica se alguém ganhou na jogada anterior
@@ -103,12 +116,29 @@ class MCTS:
             moves = Node(temp_state).untried_moves
             if not moves: return None 
             
-            # Escolhe jogada aleatória
-            m = random.choice(moves)
-            if m[1] == 'd': temp_state.drop_piece(m[0], temp_state.current_player)
-            else: temp_state.pop_piece(m[0], temp_state.current_player)
+            p_current = temp_state.current_player
+            p_opponent = 2 if p_current == 1 else 1
             
-            temp_state.current_player = 2 if temp_state.current_player == 1 else 1
+            # 1-Ply Heurística de Domínio
+            # 1. Ataque
+            m = temp_state.get_winning_move(p_current)
+            
+            # 2. Defesa (Bloqueio Simples)
+            if m is None:
+                m_defend = temp_state.get_winning_move(p_opponent)
+                if m_defend is not None:
+                    if (m_defend[0], 'd') in moves:
+                        m = (m_defend[0], 'd')
+            
+            # 3. Aleatório
+            if m is None:
+                m = random.choice(moves)
+            
+            # Executa a jogada escolhida com record=False por eficiência
+            if m[1] == 'd': temp_state.drop_piece(m[0], p_current, record=False)
+            else: temp_state.pop_piece(m[0], p_current, record=False)
+            
+            temp_state.current_player = p_opponent
 
     def _backpropagate(self, node, winner):
         """Sobe a árvore atualizando visitas e vitórias."""
