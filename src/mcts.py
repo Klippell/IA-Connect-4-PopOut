@@ -56,8 +56,10 @@ class MCTS:
             
         m_defend = initial_state.get_winning_move(p_opponent)
         if m_defend is not None:
-            # Para bloquear o oponente, o mais provável/seguro é um drop na mesma coluna
-            return (m_defend[0], 'd')
+            # Para bloquear o oponente, o mais provável/seguro é um drop na mesma coluna.
+            # CORREÇÃO: Só podemos bloquear diretamente se a ameaça for um Drop!
+            if m_defend[1] == 'd':
+                return (m_defend[0], 'd')
 
         root = Node(state=initial_state.clone())
 
@@ -126,7 +128,8 @@ class MCTS:
             # 2. Defesa (Bloqueio Simples)
             if m is None:
                 m_defend = temp_state.get_winning_move(p_opponent)
-                if m_defend is not None:
+                # CORREÇÃO: Só tenta bloquear se a ameaça for um Drop
+                if m_defend is not None and m_defend[1] == 'd':
                     if (m_defend[0], 'd') in moves:
                         m = (m_defend[0], 'd')
             
