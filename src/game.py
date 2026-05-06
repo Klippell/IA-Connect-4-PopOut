@@ -1,3 +1,9 @@
+"""
+Módulo Principal - PopOut Connect 4
+Contém o motor de regras do jogo, verificação de condições de vitória,
+e a orquestração dos modos de jogo (Humano vs Humano, Humano vs IA, IA vs IA).
+"""
+
 import numpy as np
 import copy
 import pandas as pd
@@ -5,9 +11,6 @@ import random
 from src.ui import draw_board
 from src.mcts import MCTS
 
-# =================================================================
-# CONFIGURAÇÕES E CONSTANTES DO JOGO
-# =================================================================
 ROWS = 6
 COLS = 7
 EMPTY = 0
@@ -15,7 +18,10 @@ PLAYER1 = 1
 PLAYER2 = 2  
 
 class PopOutGame:
-    """Classe que gere o estado lógico e as regras do PopOut."""
+    """
+    Gere o estado interno do tabuleiro e as regras do jogo.
+    Implementa mecânicas de Drop e Pop, e verifica condições de vitória ou empate.
+    """
     def __init__(self):
         self.board = np.zeros((ROWS, COLS), dtype=int)
         self.current_player = PLAYER1
@@ -23,13 +29,16 @@ class PopOutGame:
         self._record_state()
 
     def get_state_key(self):
+        """Retorna uma representação imutável do tabuleiro atual para hashing."""
         return tuple(map(tuple, self.board))
 
     def _record_state(self):
+        """Regista a ocorrência do estado atual para monitorizar empates por repetição."""
         key = self.get_state_key()
         self.state_history[key] = self.state_history.get(key, 0) + 1
 
     def drop_piece(self, col, piece, record=True):
+        """Executa um movimento 'Drop' (inserir peça no topo)."""
         for r in range(ROWS-1, -1, -1):
             if self.board[r][col] == EMPTY:
                 self.board[r][col] = piece 
@@ -38,6 +47,7 @@ class PopOutGame:
         return False 
 
     def pop_piece(self, col, piece, record=True):
+        """Executa um movimento 'Pop' (remover a própria peça da base)."""
         if self.board[ROWS-1][col] == piece:
             for r in range(ROWS-1, 0, -1):
                 self.board[r][col] = self.board[r-1][col]
@@ -46,13 +56,12 @@ class PopOutGame:
             return True
         return False
 
-    def get_winning_move(self, player):
-        """Verifica se há alguma jogada de vitória imediata (1-Ply Lookahead)."""
+    def get_winning_move(self, player, check_pop=True):
+        """Verifica se o jogador especificado consegue vencer numa única jogada."""
         board_full = self.is_board_full()
         original_board = np.copy(self.board)
         
         for col in range(COLS):
-            # Testar DROP
             if not board_full and self.board[0][col] == EMPTY:
                 self.drop_piece(col, player, record=False)
                 if self.check_win(player):
@@ -60,8 +69,7 @@ class PopOutGame:
                     return (col, 'd')
                 self.board = np.copy(original_board)
                 
-            # Testar POP
-            if self.board[ROWS-1][col] == player:
+            if check_pop and self.board[ROWS-1][col] == player:
                 self.pop_piece(col, player, record=False)
                 if self.check_win(player):
                     self.board = np.copy(original_board)
@@ -71,6 +79,7 @@ class PopOutGame:
         return None
 
     def check_win(self, piece):
+        """Analisa todas as linhas, colunas e diagonais à procura de 4 peças iguais."""
         for c in range(COLS-3):
             for r in range(ROWS):
                 if all(self.board[r][c+i] == piece for i in range(4)): return True
@@ -86,6 +95,7 @@ class PopOutGame:
         return False
 
     def check_winner_after_move(self, player_who_moved):
+        """Verifica o estado global de vitória após um movimento, incluindo casos de empate simultâneo."""
         p1 = self.check_win(PLAYER1)
         p2 = self.check_win(PLAYER2)
         if p1 and p2: return player_who_moved 
@@ -94,27 +104,26 @@ class PopOutGame:
         return None
 
     def is_board_full(self):
+        """Verifica se não existem espaços vazios na linha superior."""
         return all(self.board[0][c] != EMPTY for c in range(COLS))
 
     def check_repetition(self):
+        """Verifica se o estado atual do tabuleiro já ocorreu 3 ou mais vezes."""
         return self.state_history.get(self.get_state_key(), 0) >= 3
 
     def clone(self):
+        """Retorna uma cópia independente do estado do jogo atual."""
         return copy.deepcopy(self)
 
-# =================================================================
-# CONTROLADORES DE INPUT E IA
-# =================================================================
 
 def get_human_move(game):
+    """Gere a interação e validação do input humano na linha de comandos."""
     p_name = "X" if game.current_player == PLAYER1 else "O"
     
-    # Regra 3 do guião: Empate por Repetição
     if game.check_repetition():
         print(f"\n[AVISO] Este estado repetiu-se 3 vezes.")
         if input(f"Jogador {p_name}, aceita o empate? (s/n): ").lower() == 's': return "DRAW"
 
-    # Regra 2 do guião: Empate por Tabuleiro Cheio
     if game.is_board_full():
         print(f"\n[AVISO] O tabuleiro está cheio.")
         print(f"Jogador {p_name}, o seu único movimento possível é um 'Pop'.")
@@ -139,33 +148,37 @@ def get_human_move(game):
             print("[!] Erro de formato! Use: 'COLUNA TIPO' (ex: 3 d).")
 
 def _get_ai_move(ia_obj, game):
-    """Função auxiliar que extrai a jogada detetando se é Árvore ou MCTS, com segurança global."""
+    """
+    Calcula o movimento da IA escolhida (MCTS ou Decision Tree).
+    Inclui proteções de segurança de domínio para evitar decisões fatais ou ilegais.
+    """
     p_current = game.current_player
     p_opponent = 2 if p_current == 1 else 1
 
-    # --- VALIDAÇÃO DE SEGURANÇA GLOBAL ---
-    # 1. Ataque letal imediato
     m_win = game.get_winning_move(p_current)
     if m_win is not None:
         return m_win
 
-    # 2. Defesa imediata
-    m_defend = game.get_winning_move(p_opponent)
+    m_defend = game.get_winning_move(p_opponent, check_pop=False)
     if m_defend is not None:
-        # Se a ameaça for Drop e a coluna não estiver cheia, nós bloqueamos
         if m_defend[1] == 'd' and not game.is_board_full() and game.board[0][m_defend[0]] == EMPTY:
             return (m_defend[0], 'd')
-    # -------------------------------------------------------------
 
-    if hasattr(ia_obj, 'predict'): # Se for a Árvore de Decisão
+    if hasattr(ia_obj, 'predict'):
+        # Normalização do tabuleiro baseada na perspetiva (Eu vs Inimigo)
         flat_board = game.board.flatten().tolist()
-        df = pd.DataFrame([flat_board + [game.current_player]], columns=[f"pos_{i}" for i in range(42)] + ["p_turn"])
+        normalized_board = []
+        for piece in flat_board:
+            if piece == EMPTY: normalized_board.append(0)
+            elif piece == p_current: normalized_board.append(1)
+            else: normalized_board.append(-1)
+            
+        df = pd.DataFrame([normalized_board], columns=[f"pos_{i}" for i in range(42)])
         previsao = ia_obj.predict(df)[0]
         
         col = int(previsao.split("_")[0])
         m_type = previsao.split("_")[1]
         
-        # --- REALITY CHECK: O movimento da Árvore é legal? ---
         is_valid = False
         if m_type == 'd' and not game.is_board_full() and game.board[0][col] == EMPTY:
             is_valid = True
@@ -175,8 +188,6 @@ def _get_ai_move(ia_obj, game):
         if is_valid:
             return (col, m_type)
         else:
-            # A Árvore "alucinou" uma jogada impossível. 
-            # Forçamos uma jogada aleatória legal para evitar o loop infinito.
             valid_moves = []
             for c in range(COLS):
                 if not game.is_board_full() and game.board[0][c] == EMPTY:
@@ -184,17 +195,17 @@ def _get_ai_move(ia_obj, game):
                 if game.board[ROWS-1][c] == p_current:
                     valid_moves.append((c, 'p'))
             
-            if not valid_moves: return None # Prevenção extrema de crash
+            if not valid_moves: return None
             return random.choice(valid_moves)
 
-    else: # Se for o MCTS
+    else: 
         return ia_obj.search(game)
 
-# =================================================================
-# MOTOR PRINCIPAL DO JOGO
-# =================================================================
 
 def play_game(mode, ia_std=None, ia_p1=None, ia_p2=None, nome_p1="Humano (X)", nome_p2="Humano (O)"):
+    """
+    Controla o fluxo sequencial da partida, alternando turnos e verificando o resultado.
+    """
     game = PopOutGame()
     human_p = PLAYER1
     
@@ -246,21 +257,16 @@ def play_game(mode, ia_std=None, ia_p1=None, ia_p2=None, nome_p1="Humano (X)", n
         winner = game.check_winner_after_move(game.current_player)
         if winner:
             draw_board(game)
-            # Aqui exibimos o nome específico da IA ou Humano que venceu
             vencedor_final = nome_p1 if winner == PLAYER1 else nome_p2
             print(f"\n*** VITÓRIA: {vencedor_final.upper()} VENCEU! ***")
             break
         
         game.current_player = PLAYER2 if game.current_player == PLAYER1 else PLAYER1
 
-# =================================================================
-# MENU PRINCIPAL (Configurado via Jupyter)
-# =================================================================
 
 def main_menu(mcts1=None, mcts2=None, tree1=None, tree2=None):
     """
-    Menu dinâmico que recebe as IAs configuradas no Jupyter Notebook
-    e organiza os duelos baseados nas escolhas do utilizador.
+    Apresenta as opções interativas de modos de jogo.
     """
     if mcts1 is None: mcts1 = MCTS(iterations=1000, c=1.41)
     if mcts2 is None: mcts2 = MCTS(iterations=10000, c=1.41)
