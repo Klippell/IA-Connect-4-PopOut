@@ -1,11 +1,10 @@
 """
-Módulo Principal - PopOut Connect 4
+Módulo Principal - PopOut Connect 4 (OTIMIZADO)
 Contém o motor de regras do jogo, verificação de condições de vitória,
 e a orquestração dos modos de jogo (Humano vs Humano, Humano vs IA, IA vs IA).
 """
 
 import numpy as np
-import copy
 import pandas as pd
 import random
 from src.ui import draw_board
@@ -18,27 +17,44 @@ PLAYER1 = 1
 PLAYER2 = 2  
 
 class PopOutGame:
-    """
-    Gere o estado interno do tabuleiro e as regras do jogo.
-    Implementa mecânicas de Drop e Pop, e verifica condições de vitória ou empate.
-    """
     def __init__(self):
-        self.board = np.zeros((ROWS, COLS), dtype=int)
+        self.board = np.zeros((ROWS, COLS), dtype=np.intp)
         self.current_player = PLAYER1
         self.state_history = {} 
         self._record_state()
 
     def get_state_key(self):
-        """Retorna uma representação imutável do tabuleiro atual para hashing."""
         return tuple(map(tuple, self.board))
 
     def _record_state(self):
-        """Regista a ocorrência do estado atual para monitorizar empates por repetição."""
         key = self.get_state_key()
         self.state_history[key] = self.state_history.get(key, 0) + 1
 
+    # --- NOVOS MÉTODOS DE OTIMIZAÇÃO DE PERFORMANCE ---
+    def clone(self):
+        """
+        Retorna uma cópia rápida do estado atual do jogo.
+        Ota-se por não copiar o histórico de estados para otimizar memória e processamento nas simulações MCTS.
+        """
+        new_game = PopOutGame()
+        new_game.board = np.copy(self.board)
+        new_game.current_player = self.current_player
+        return new_game
+
+    def get_valid_moves(self):
+        """Calcula movimentos válidos diretamente no estado."""
+        moves = []
+        board_full = self.is_board_full()
+        for col in range(COLS):
+            if not board_full and self.board[0][col] == EMPTY:
+                moves.append((col, 'd'))
+            if self.board[ROWS-1][col] == self.current_player:
+                moves.append((col, 'p'))
+        return moves
+
+    # ----------------------------------------------------
+
     def drop_piece(self, col, piece, record=True):
-        """Executa um movimento 'Drop' (inserir peça no topo)."""
         for r in range(ROWS-1, -1, -1):
             if self.board[r][col] == EMPTY:
                 self.board[r][col] = piece 
@@ -47,7 +63,6 @@ class PopOutGame:
         return False 
 
     def pop_piece(self, col, piece, record=True):
-        """Executa um movimento 'Pop' (remover a própria peça da base)."""
         if self.board[ROWS-1][col] == piece:
             for r in range(ROWS-1, 0, -1):
                 self.board[r][col] = self.board[r-1][col]
@@ -56,30 +71,8 @@ class PopOutGame:
             return True
         return False
 
-    def get_winning_move(self, player, check_pop=True):
-        """Verifica se o jogador especificado consegue vencer numa única jogada."""
-        board_full = self.is_board_full()
-        original_board = np.copy(self.board)
-        
-        for col in range(COLS):
-            if not board_full and self.board[0][col] == EMPTY:
-                self.drop_piece(col, player, record=False)
-                if self.check_win(player):
-                    self.board = np.copy(original_board)
-                    return (col, 'd')
-                self.board = np.copy(original_board)
-                
-            if check_pop and self.board[ROWS-1][col] == player:
-                self.pop_piece(col, player, record=False)
-                if self.check_win(player):
-                    self.board = np.copy(original_board)
-                    return (col, 'p')
-                self.board = np.copy(original_board)
-                
-        return None
 
     def check_win(self, piece):
-        """Analisa todas as linhas, colunas e diagonais à procura de 4 peças iguais."""
         for c in range(COLS-3):
             for r in range(ROWS):
                 if all(self.board[r][c+i] == piece for i in range(4)): return True
@@ -95,7 +88,6 @@ class PopOutGame:
         return False
 
     def check_winner_after_move(self, player_who_moved):
-        """Verifica o estado global de vitória após um movimento, incluindo casos de empate simultâneo."""
         p1 = self.check_win(PLAYER1)
         p2 = self.check_win(PLAYER2)
         if p1 and p2: return player_who_moved 
@@ -104,20 +96,16 @@ class PopOutGame:
         return None
 
     def is_board_full(self):
-        """Verifica se não existem espaços vazios na linha superior."""
         return all(self.board[0][c] != EMPTY for c in range(COLS))
 
     def check_repetition(self):
-        """Verifica se o estado atual do tabuleiro já ocorreu 3 ou mais vezes."""
         return self.state_history.get(self.get_state_key(), 0) >= 3
-
-    def clone(self):
-        """Retorna uma cópia independente do estado do jogo atual."""
-        return copy.deepcopy(self)
 
 
 def get_human_move(game):
-    """Gere a interação e validação do input humano na linha de comandos."""
+    """
+    Solicita a entrada do jogador humano e processa o formato da jogada.
+    """
     p_name = "X" if game.current_player == PLAYER1 else "O"
     
     if game.check_repetition():
@@ -149,23 +137,11 @@ def get_human_move(game):
 
 def _get_ai_move(ia_obj, game):
     """
-    Calcula o movimento da IA escolhida (MCTS ou Decision Tree).
-    Inclui proteções de segurança de domínio para evitar decisões fatais ou ilegais.
+    Solicita a jogada da Inteligência Artificial (compatível com MCTS ou Árvore de Decisão).
     """
     p_current = game.current_player
-    p_opponent = 2 if p_current == 1 else 1
-
-    m_win = game.get_winning_move(p_current)
-    if m_win is not None:
-        return m_win
-
-    m_defend = game.get_winning_move(p_opponent, check_pop=False)
-    if m_defend is not None:
-        if m_defend[1] == 'd' and not game.is_board_full() and game.board[0][m_defend[0]] == EMPTY:
-            return (m_defend[0], 'd')
 
     if hasattr(ia_obj, 'predict'):
-        # Normalização do tabuleiro baseada na perspetiva (Eu vs Inimigo)
         flat_board = game.board.flatten().tolist()
         normalized_board = []
         for piece in flat_board:
@@ -188,26 +164,20 @@ def _get_ai_move(ia_obj, game):
         if is_valid:
             return (col, m_type)
         else:
-            valid_moves = []
-            for c in range(COLS):
-                if not game.is_board_full() and game.board[0][c] == EMPTY:
-                    valid_moves.append((c, 'd'))
-                if game.board[ROWS-1][c] == p_current:
-                    valid_moves.append((c, 'p'))
-            
+            valid_moves = game.get_valid_moves()
             if not valid_moves: return None
             return random.choice(valid_moves)
-
     else: 
         return ia_obj.search(game)
 
-
 def play_game(mode, ia_std=None, ia_p1=None, ia_p2=None, nome_p1="Humano (X)", nome_p2="Humano (O)"):
     """
-    Controla o fluxo sequencial da partida, alternando turnos e verificando o resultado.
+    Controla o ciclo principal de um jogo interativo (CLI).
+    Modes: 1 (Humano vs Humano), 2 (Humano vs IA), 3 (IA vs IA Visual).
     """
     game = PopOutGame()
     human_p = PLAYER1
+    num_moves = 0
     
     if mode == 2:
         print("\n--- Configuração de Partida ---")
@@ -222,7 +192,13 @@ def play_game(mode, ia_std=None, ia_p1=None, ia_p2=None, nome_p1="Humano (X)", n
 
     while True:
         draw_board(game)
+        
+        if mode == 3 and (game.check_repetition() or num_moves > 150):
+            print("\n*** JOGO TERMINOU EMPATADO (Repetição ou Limite de 150 turnos)! ***")
+            break
+
         move = None
+        ia_failed = False
 
         if mode == 1: 
             human_action = get_human_move(game)
@@ -242,19 +218,27 @@ def play_game(mode, ia_std=None, ia_p1=None, ia_p2=None, nome_p1="Humano (X)", n
                 nome_atual = nome_p1 if game.current_player == PLAYER1 else nome_p2
                 print(f"\n[{nome_atual}] A calcular jogada...")
                 move = _get_ai_move(ia_std, game)
+                if move is None: ia_failed = True
                 
         elif mode == 3: 
             active_ia = ia_p1 if game.current_player == PLAYER1 else ia_p2
             nome_atual = nome_p1 if game.current_player == PLAYER1 else nome_p2
             print(f"\n[{nome_atual}] A calcular jogada...")
             move = _get_ai_move(active_ia, game)
+            if move is None: ia_failed = True
+
+        if ia_failed:
+            print("\n*** JOGO TERMINOU EMPATADO (A IA declarou impasse)! ***")
+            break
 
         if move:
             col, m_type = move
             if m_type == 'd': game.drop_piece(col, game.current_player)
             else: game.pop_piece(col, game.current_player)
 
+        num_moves += 1
         winner = game.check_winner_after_move(game.current_player)
+        
         if winner:
             draw_board(game)
             vencedor_final = nome_p1 if winner == PLAYER1 else nome_p2
@@ -263,69 +247,96 @@ def play_game(mode, ia_std=None, ia_p1=None, ia_p2=None, nome_p1="Humano (X)", n
         
         game.current_player = PLAYER2 if game.current_player == PLAYER1 else PLAYER1
 
+def _descrever_ia(nome, ia_obj):
+    """Retorna uma string com a descrição/configuração de um agente IA."""
+    if isinstance(ia_obj, MCTS):
+        return (f"{nome}  [MCTS: iter={ia_obj.iterations}, c={ia_obj.c}, "
+                f"children={ia_obj.max_children}, depth={ia_obj.max_depth}, pure={ia_obj.pure_mode}]")
+    else:
+        return f"{nome}  [Árvore de Decisão]"
 
-def main_menu(mcts1=None, mcts2=None, tree1=None, tree2=None):
-    """
-    Apresenta as opções interativas de modos de jogo.
-    """
-    if mcts1 is None: mcts1 = MCTS(iterations=1000, c=1.41)
-    if mcts2 is None: mcts2 = MCTS(iterations=10000, c=1.41)
+
+def _escolher_ia(agentes, mensagem="Escolha uma IA"):
+    """Mostra lista numerada de agentes e retorna (nome, objeto) escolhido."""
+    nomes = list(agentes.keys())
+    print(f"\n--- {mensagem} ---")
+    for i, nome in enumerate(nomes, 1):
+        print(f"  {i}. {_descrever_ia(nome, agentes[nome])}")
 
     while True:
-        print("\n" + "="*30 + "\n      POPOUT AI SYSTEM 2026\n" + "="*30)
+        try:
+            idx = int(input(f"Escolha (1-{len(nomes)}): ").strip()) - 1
+            if 0 <= idx < len(nomes):
+                escolhido = nomes[idx]
+                print(f"  → Selecionado: {_descrever_ia(escolhido, agentes[escolhido])}")
+                return escolhido, agentes[escolhido]
+            print("[!] Número fora do intervalo.")
+        except ValueError:
+            print("[!] Introduza um número válido.")
+
+
+def main_menu(mcts_configs=None, arvores=None,
+              mcts1=None, mcts2=None, tree1=None, tree2=None):
+    """
+    Menu principal do sistema PopOut AI.
+    Aceita dois formatos de argumentos:
+      - Novo: mcts_configs (dict) e arvores (dict)
+      - Legado: mcts1, mcts2, tree1, tree2 (para compatibilidade com o notebook)
+    """
+    # ── Construir dicionário unificado de agentes ────────────────────────
+    agentes = {}
+
+    if mcts_configs:
+        agentes.update(mcts_configs)
+    else:
+        # Modo legado (compatibilidade com notebook)
+        if mcts1 is None:
+            mcts1 = MCTS(iterations=10000, c=1.41)
+        if mcts2 is None:
+            mcts2 = MCTS(iterations=10000, c=1.41)
+        agentes["mcts1"] = mcts1
+        agentes["mcts2"] = mcts2
+
+    if arvores:
+        agentes.update(arvores)
+    else:
+        # Modo legado
+        if tree1 is not None:
+            agentes["tree1"] = tree1
+        if tree2 is not None:
+            agentes["tree2"] = tree2
+
+    # ── Loop do menu ─────────────────────────────────────────────────────
+    while True:
+        print("\n" + "="*40)
+        print("        POPOUT AI SYSTEM 2026")
+        print("="*40)
+        print(f"  Agentes disponíveis: {len(agentes)}")
+        for nome, ia in agentes.items():
+            print(f"    • {_descrever_ia(nome, ia)}")
+        print("-"*40)
         print("1. Iniciar Humano vs Humano")
         print("2. Desafiar IA")
         print("3. Modo Observador (IA vs IA Visual)")
         print("4. Sair")
-        
+
         op = input("\nEscolha uma opção: ").strip()
-        
-        if op == "1": 
+
+        if op == "1":
             play_game(1)
-            
-        elif op == "2": 
-            print("\n--- Escolher IA para o Desafio ---")
-            print("1. Monte Carlo (mcts1)")
-            print("2. Árvore de Decisão (tree1)")
-            escolha = input("Escolha (1/2): ").strip()
-            
-            if escolha == "1":
-                play_game(2, ia_std=mcts1, nome_p2="mcts1")
-            elif escolha == "2":
-                if tree1 is None:
-                    print("[!] Árvore não enviada! A usar mcts1.")
-                    play_game(2, ia_std=mcts1, nome_p2="mcts1")
-                else:
-                    play_game(2, ia_std=tree1, nome_p2="tree1")
-            else:
-                print("[!] Opção inválida.")
-                
-        elif op == "3": 
-            print("\n--- Configurar Duelo ---")
-            print("1. MCTS vs MCTS (mcts1 x mcts2)")
-            print("2. Árvore vs Árvore (tree1 x tree2)")
-            print("3. MCTS vs Árvore (mcts1 x tree1)")
-            print("4. Árvore vs MCTS (tree1 x mcts1)")
-            escolha = input("Escolha o duelo: ").strip()
-            
-            if escolha == "1":
-                play_game(3, ia_p1=mcts1, ia_p2=mcts2, nome_p1="mcts1", nome_p2="mcts2")
-            elif escolha == "2":
-                if tree1 is None or tree2 is None:
-                    print("[!] Falta configurar tree1 ou tree2 no Jupyter!")
-                else:
-                    play_game(3, ia_p1=tree1, ia_p2=tree2, nome_p1="tree1", nome_p2="tree2")
-            elif escolha == "3":
-                if tree1 is None: print("[!] Árvore não foi enviada!")
-                else: play_game(3, ia_p1=mcts1, ia_p2=tree1, nome_p1="mcts1", nome_p2="tree1")
-            elif escolha == "4":
-                if tree1 is None: print("[!] Árvore não foi enviada!")
-                else: play_game(3, ia_p1=tree1, ia_p2=mcts1, nome_p1="tree1", nome_p2="mcts1")
-            else:
-                print("[!] Opção inválida.")
-                
-        elif op == "4": 
+
+        elif op == "2":
+            nome, ia = _escolher_ia(agentes, "Escolha a IA adversária")
+            play_game(2, ia_std=ia, nome_p2=nome)
+
+        elif op == "3":
+            print("\n=== Configurar Duelo IA vs IA ===")
+            nome1, ia1 = _escolher_ia(agentes, "Escolha o Jogador 1 (X)")
+            nome2, ia2 = _escolher_ia(agentes, "Escolha o Jogador 2 (O)")
+            play_game(3, ia_p1=ia1, ia_p2=ia2, nome_p1=nome1, nome_p2=nome2)
+
+        elif op == "4":
             print("A encerrar o sistema...")
             break
-        else: 
+        else:
             print("[!] Opção inválida. Tente novamente.")

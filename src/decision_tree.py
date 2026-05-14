@@ -22,9 +22,9 @@ def clean_conflicting_data(df, target_name="target_move"):
     """
     feature_cols = [col for col in df.columns if col != target_name]
     
-    print(f"[SISTEMA] A limpar ambiguidades... Tamanho original: {len(df)} linhas.")
+    print(f"[INFO] A remover ambiguidades... Tamanho original: {len(df)} linhas.")
     df_clean = df.groupby(feature_cols)[target_name].agg(lambda x: pd.Series.mode(x)[0]).reset_index()
-    print(f"[SISTEMA] Limpeza concluída. Novo tamanho: {len(df_clean)} linhas.")
+    print(f"[INFO] Processamento concluído. Novo tamanho: {len(df_clean)} linhas.")
     
     return df_clean
 
@@ -279,7 +279,7 @@ def plotar_arvore_decisao(node, titulo="Árvore de Decisão", metricas=None):
         texto_metricas = (
             f"DADOS DO MODELO\n"
             f"---------------------------------\n"
-            f"Profundidade: {metricas.get('profundidade', '?')} níveis\n" # <--- LINHA NOVA
+            f"Profundidade: {metricas.get('profundidade', '?')} níveis\n"
             f"Total de Amostras: {metricas.get('total', '?')}\n"
             f"Previsões Corretas: {metricas.get('corretas', '?')}\n"
             f"Acurácia Global: {metricas.get('acuracia', 0):.2f}%"

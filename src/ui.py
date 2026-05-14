@@ -21,7 +21,6 @@ def draw_board(game):
     Parâmetros:
         game (Game): Instância do objeto de jogo, que contém a matriz 'board'.
     """
-    clear_screen()
     print("\n" + " " * 8 + "=== PopOut AI ===")
     print("   0   1   2   3   4   5   6")
     print(COLOR_BOARD + " ╔═══╦═══╦═══╦═══╦═══╦═══╦═══╗" + RESET_COLOR)

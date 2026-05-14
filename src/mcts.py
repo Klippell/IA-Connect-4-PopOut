@@ -1,17 +1,77 @@
 """
 Módulo MCTS (Monte Carlo Tree Search)
-Implementa a lógica do agente inteligente para jogar PopOut Connect 4,
-utilizando procura em árvore combinada com a fórmula UCT e heurísticas de 1-Ply (Heavy Playout).
+Implementa o agente inteligente para jogar PopOut Connect 4 em Python puro.
 """
 
 import math
 import random
 
+# =====================================================================
+# 1. HEURÍSTICAS E OTIMIZAÇÕES DE TABULEIRO (Rápidas)
+# =====================================================================
+
+def _build_lines():
+    lines = []
+    for r in range(6):
+        for c in range(4): lines.append(((r,c), (r,c+1), (r,c+2), (r,c+3))) # Horizontais
+    for c in range(7):
+        for r in range(3): lines.append(((r,c), (r+1,c), (r+2,c), (r+3,c))) # Verticais
+    for r in range(3):
+        for c in range(4): lines.append(((r,c), (r+1,c+1), (r+2,c+2), (r+3,c+3))) # Diagonais ↘
+    for r in range(3, 6):
+        for c in range(4): lines.append(((r,c), (r-1,c+1), (r-2,c+2), (r-3,c+3))) # Diagonais ↗
+    return lines
+
+_LINES = _build_lines()
+_CELL_LI = [[ [i for i, ln in enumerate(_LINES) if (r,c) in ln] for c in range(7)] for r in range(6)]
+_COL_LI = [ list(set(i for r in range(6) for i in _CELL_LI[r][c])) for c in range(7) ]
+
+def _win(board, piece, indices):
+    """
+    Verificação otimizada de vitória testando apenas as linhas afetadas pela jogada.
+    """
+    for i in indices:
+        a, b, c, d = _LINES[i]
+        if board[a[0], a[1]] == piece and board[b[0], b[1]] == piece and \
+           board[c[0], c[1]] == piece and board[d[0], d[1]] == piece:
+            return True
+    return False
+
+def get_valid_moves(board, player):
+    """
+    Retorna as jogadas legais analisando o estado atual da matriz.
+    """
+    full = not (board[0] == 0).any()
+    return [(c, 'd') for c in range(7) if not full and board[0,c] == 0] + \
+           [(c, 'p') for c in range(7) if board[5,c] == player]
+
+def get_winning_move(board, piece, moves, check_pop=True):
+    """
+    Simula os movimentos possíveis para encontrar uma jogada vencedora imediata.
+    """
+    for col, m_type in moves:
+        if m_type == 'd':
+            for r in range(5, -1, -1):
+                if board[r, col] == 0:
+                    board[r, col] = piece
+                    won = _win(board, piece, _CELL_LI[r][col])
+                    board[r, col] = 0
+                    if won: return (col, 'd'), r
+                    break
+        elif check_pop and m_type == 'p':
+            col_save = board[:, col].copy()
+            board[1:, col] = board[:-1, col]; board[0, col] = 0
+            won = _win(board, piece, _COL_LI[col])
+            board[:, col] = col_save
+            if won: return (col, 'p'), -1
+    return None, -1
+
+
+# =====================================================================
+# 2. ALGORITMO MCTS
+# =====================================================================
+
 class Node:
-    """
-    Representa um nó na árvore de procura MCTS.
-    Armazena o estado do jogo e estatísticas vitais para o cálculo UCT.
-    """
     def __init__(self, state, parent=None, move=None):
         self.state = state
         self.parent = parent
@@ -19,168 +79,112 @@ class Node:
         self.children = []
         self.wins = 0
         self.visits = 0
-        self.untried_moves = self._get_valid_moves(self.state)
-
-    def _get_valid_moves(self, game_state):
-        """
-        Calcula todas as jogadas (drop ou pop) legais a partir do estado atual.
-        """
-        moves = []
-        board_full = game_state.is_board_full()
-        for col in range(7):
-            if not board_full and game_state.board[0][col] == 0:
-                moves.append((col, 'd'))
-            if game_state.board[5][col] == game_state.current_player:
-                moves.append((col, 'p'))
-        return moves
+        self.untried_moves = get_valid_moves(state.board, state.current_player)
 
 class MCTS:
-    """
-    Controlador do Algoritmo Monte Carlo Tree Search.
-    Gere as fases de seleção, expansão, simulação e retropropagação.
-    """
-    def __init__(self, iterations=1000, c=1.41, max_children=None, max_depth=60):
+    def __init__(self, iterations=10000, c=1.41, max_children=None, max_depth=60, pure_mode=False):
         self.iterations = iterations
         self.c = c
         self.max_children = max_children
         self.max_depth = max_depth
+        self.pure_mode = pure_mode
 
     def search(self, initial_state):
-        """
-        Inicia a procura iterativa e retorna a melhor jogada encontrada.
-        (A verificação de vitória imediata (1-ply) na raiz foi movida 
-        para o motor do jogo (game.py) para evitar redundância).
-        """
-        # Vai direto para a criação da raiz, pois o game.py já filtrou as jogadas óbvias
-        root = Node(state=initial_state.clone())
+        p = initial_state.current_player
+        moves = get_valid_moves(initial_state.board, p)
+        
+        if not self.pure_mode:
+            m_win, _ = get_winning_move(initial_state.board, p, moves)
+            if m_win: return m_win
+            
+            m_def, _ = get_winning_move(initial_state.board, 2 if p==1 else 1, [(c,'d') for c, t in moves if t=='d'], False)
+            if m_def: return m_def
 
+        root = Node(state=initial_state.clone())
+        
         for _ in range(self.iterations):
             node = self._select(root)
             winner = self._simulate(node.state)
             self._backpropagate(node, winner)
 
-        if not root.children: 
-            return None
-            
-        return max(root.children, key=lambda n: n.visits).move
+        return max(root.children, key=lambda n: n.visits).move if root.children else None
 
     def _select(self, node):
-        """
-        Percorre a árvore desde a raiz até encontrar um nó expansível
-        ou um estado final, baseando-se no valor UCT de cada filho.
-        """
         while not self._is_terminal(node.state):
-            if len(node.untried_moves) > 0:
-                if self.max_children is None or len(node.children) < self.max_children:
-                    return self._expand(node)
-            
+            if node.untried_moves and (self.max_children is None or len(node.children) < self.max_children):
+                return self._expand(node)
             if not node.children: 
                 break
-                
-            node = self._best_child_uct(node)
-            
+            # Seleciona o melhor filho usando o algoritmo UCB1
+            node = max(node.children, key=lambda c: (c.wins/c.visits) + self.c * math.sqrt(math.log(node.visits)/c.visits))
         return node
 
     def _expand(self, node):
-        """
-        Expande a árvore instanciando um novo filho através de uma jogada aleatória não testada.
-        """
         move = random.choice(node.untried_moves)
         node.untried_moves.remove(move)
         
-        new_state = node.state.clone()
-        col, m_type = move
+        s = node.state.clone()
+        if move[1] == 'd': s.drop_piece(move[0], s.current_player)
+        else: s.pop_piece(move[0], s.current_player)
+        s.current_player = 2 if s.current_player == 1 else 1
         
-        if m_type == 'd': 
-            new_state.drop_piece(col, new_state.current_player)
-        else: 
-            new_state.pop_piece(col, new_state.current_player)
-        
-        new_state.current_player = 2 if new_state.current_player == 1 else 1
-        
-        child = Node(state=new_state, parent=node, move=move)
+        child = Node(state=s, parent=node, move=move)
         node.children.append(child)
-        
         return child
 
     def _simulate(self, state):
-        """
-        Conduz uma simulação do jogo até um estado final (rollout).
-        MANTÉM heurísticas simples (1-ply) para vitórias diretas ou bloqueios
-        para não simular o futuro de forma "cega".
-        """
-        temp_state = state.clone()
+        b = state.board.copy()
+        p = state.current_player
         depth = 0
+        opp = 2 if p == 1 else 1
         
-        while True:
-            # Proteção contra simulação excessivamente longa (Loops infinitos de PopOut)
-            if self.max_depth is not None and depth >= self.max_depth: 
-                return None 
+        # Retorna se o estado simulado inicial já for um estado de vitória
+        if _win(b, opp, range(len(_LINES))): return opp
 
-            last_p = 2 if temp_state.current_player == 1 else 1
-            winner = temp_state.check_winner_after_move(last_p)
+        while self.max_depth is None or depth < self.max_depth:
+            moves = get_valid_moves(b, p)
+            if not moves: return None
             
-            if winner is not None: 
-                return winner
+            opp = 2 if p == 1 else 1
+            m, m_row = None, -1
             
-            moves = Node(temp_state).untried_moves
-            if not moves: 
-                return None 
-            
-            p_current = temp_state.current_player
-            p_opponent = 2 if p_current == 1 else 1
-            
-            # Heavy Playout: Tenta ganhar na própria imaginação
-            m = temp_state.get_winning_move(p_current)
-            
-            if m is None:
-                m_defend = temp_state.get_winning_move(p_opponent, check_pop=False)
-                if m_defend is not None and m_defend[1] == 'd':
-                    if (m_defend[0], 'd') in moves:
-                        m = (m_defend[0], 'd')
-            
-            if m is None:
+            if not self.pure_mode:
+                m, m_row = get_winning_move(b, p, moves)
+                if not m:
+                    m_def, r_def = get_winning_move(b, opp, [(c,'d') for c, t in moves if t=='d'], False)
+                    if m_def: m, m_row = m_def, r_def
+
+            if not m:
                 m = random.choice(moves)
-            
-            if m[1] == 'd': 
-                temp_state.drop_piece(m[0], p_current, record=False)
-            else: 
-                temp_state.pop_piece(m[0], p_current, record=False)
-            
-            temp_state.current_player = p_opponent
+                if m[1] == 'd':
+                    for r in range(5, -1, -1):
+                        if b[r, m[0]] == 0: 
+                            m_row = r
+                            break
+
+            if m[1] == 'd':
+                b[m_row, m[0]] = p
+                if _win(b, p, _CELL_LI[m_row][m[0]]): return p
+            else:
+                b[1:, m[0]] = b[:-1, m[0]]
+                b[0, m[0]] = 0
+                w_p, w_opp = _win(b, p, _COL_LI[m[0]]), _win(b, opp, _COL_LI[m[0]])
+                if w_p or w_opp: return p if (w_p and w_opp) or w_p else opp
+
+            p = opp
             depth += 1
+            
+        return None
 
     def _backpropagate(self, node, winner):
-        """
-        Propaga o resultado da simulação (vitória/derrota/empate) de volta pela árvore
-        até à raiz, atualizando os contadores de visitas e vitórias.
-        """
-        while node is not None:
+        while node:
             node.visits += 1
-            player_who_just_moved = 2 if node.state.current_player == 1 else 1
-            
-            if winner == player_who_just_moved:
-                node.wins += 1
-            elif winner is None:
-                node.wins += 0.5
-                
+            mover = 2 if node.state.current_player == 1 else 1
+            node.wins += 1 if winner == mover else (0.5 if winner is None else 0)
             node = node.parent
 
-    def _best_child_uct(self, node):
-        """
-        Seleciona o filho com o maior valor na fórmula Upper Confidence Bound for Trees (UCT).
-        """
-        def uct(child):
-            return (child.wins / child.visits) + self.c * math.sqrt(math.log(node.visits) / child.visits)
-        return max(node.children, key=uct)
-
     def _is_terminal(self, state):
-        """
-        Verifica se o estado atual representa o fim do jogo (vitória de alguém ou empate).
-        """
         last_p = 2 if state.current_player == 1 else 1
         if state.check_winner_after_move(last_p) is not None: 
             return True
-        if not Node(state).untried_moves: 
-            return True
-        return False
+        return len(get_valid_moves(state.board, state.current_player)) == 0

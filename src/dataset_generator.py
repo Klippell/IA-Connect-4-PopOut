@@ -1,5 +1,6 @@
 """
 Módulo de Geração de Datasets (Simulação Automática)
+
 Permite executar simulações automáticas de IA vs IA (MCTS) e registar 
 o histórico de cada estado de jogo, jogada e vencedor num ficheiro CSV, 
 gerando dados para treino da Árvore de Decisão.
@@ -12,8 +13,15 @@ from src.game import PopOutGame, PLAYER1
 
 def save_game_to_dataset(game_history, winner, game_id, filename):
     """
-    Grava os movimentos e o resultado de um jogo num ficheiro CSV de forma append (segura).
-    Gera automaticamente os cabeçalhos das colunas se o ficheiro for novo.
+    Grava os movimentos e o resultado de um jogo num ficheiro CSV de forma sequencial (append).
+    
+    Se o ficheiro não existir, gera os cabeçalhos automaticamente.
+    
+    Args:
+        game_history (list): Lista com o histórico de jogadas e estados.
+        winner (int): ID do jogador vencedor (ou 0 para empate).
+        game_id (str): Identificador único da partida.
+        filename (str): Caminho do ficheiro CSV de destino.
     """
     file_exists = os.path.isfile(filename)
     
@@ -30,40 +38,44 @@ def save_game_to_dataset(game_history, winner, game_id, filename):
 
 def run_batch_simulation(num_games, ia_1, ia_2):
     """
-    Controla o loop de simulação para gerar múltiplos jogos automáticos.
-    Gere o estado temporal do jogo, regista cada 'frame' da partida na memória 
-    e envia o bloco para disco no final da partida.
+    Executa um lote de simulações automáticas de jogos entre duas IAs.
+    
+    Args:
+        num_games (int): Número de jogos a simular.
+        ia_1 (MCTS): Agente IA correspondente ao jogador 1.
+        ia_2 (MCTS): Agente IA correspondente ao jogador 2.
     """
     os.makedirs("datasets", exist_ok=True)
     
-    # Capturar o max_children (Corrige o bug de gravar sempre "7" quando é "None")
-    mc1 = ia_1.max_children if ia_1.max_children is not None else "All"
-    mc2 = ia_2.max_children if ia_2.max_children is not None else "All"
+    mc1 = ia_1.max_children if getattr(ia_1, 'max_children', None) is not None else "All"
+    mc2 = ia_2.max_children if getattr(ia_2, 'max_children', None) is not None else "All"
     
-    # Capturar o max_depth de forma segura
-    val_d1 = getattr(ia_1, 'max_depth', None)
-    d1 = val_d1 if val_d1 is not None else "None"
+    d1 = getattr(ia_1, 'max_depth', "None")
+    d2 = getattr(ia_2, 'max_depth', "None")
     
-    val_d2 = getattr(ia_2, 'max_depth', None)
-    d2 = val_d2 if val_d2 is not None else "None"
+    pm1 = "pure" if getattr(ia_1, 'pure_mode', False) else "opt"
+    pm2 = "pure" if getattr(ia_2, 'pure_mode', False) else "opt"
     
-    # Atualizar o nome do ficheiro para incluir a profundidade
-    config_p1 = f"P1_it{ia_1.iterations}_c{ia_1.c}_mc{mc1}_d{d1}"
-    config_p2 = f"P2_it{ia_2.iterations}_c{ia_2.c}_mc{mc2}_d{d2}"
+    config_p1 = f"P1_it{ia_1.iterations}_c{ia_1.c}_mc{mc1}_d{d1}_{pm1}"
+    config_p2 = f"P2_it{ia_2.iterations}_c{ia_2.c}_mc{mc2}_d{d2}_{pm2}"
     filename = f"datasets/{config_p1}_vs_{config_p2}.csv"
     
-    print(f"\n[SISTEMA] A gerar lote de {num_games} jogos...")
-    print(f"[ARQUIVO] {filename}")
+    print(f"\n[INFO] A gerar lote de {num_games} jogos...")
+    print(f"[INFO] Ficheiro de destino: {filename}")
     
     for i in range(num_games):
         game = PopOutGame()
         game_history = [] 
         winner = 0 
+        num_moves = 0
         
-        # Gera uma assinatura hash única para identificar a partida no dataset
         current_game_id = uuid.uuid4().hex[:8]
         
         while True:
+            if game.check_repetition() or num_moves > 150:
+                winner = 0
+                break
+                
             curr_ia = ia_1 if game.current_player == PLAYER1 else ia_2
             move = curr_ia.search(game)
             
@@ -78,6 +90,8 @@ def run_batch_simulation(num_games, ia_1, ia_2):
                 game.drop_piece(move[0], game.current_player)
             else: 
                 game.pop_piece(move[0], game.current_player)
+                
+            num_moves += 1
             
             vencedor_atual = game.check_winner_after_move(game.current_player)
             if vencedor_atual:
@@ -90,3 +104,5 @@ def run_batch_simulation(num_games, ia_1, ia_2):
         
         status_vencedor = "Empate" if winner == 0 else f"P{winner}"
         print(f"> Jogo {i + 1}/{num_games} guardado (ID: {current_game_id} | Vencedor: {status_vencedor})")
+
+    print(f"[INFO] Lote concluído. Ficheiros guardados em {filename}.")
