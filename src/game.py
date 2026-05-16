@@ -180,14 +180,17 @@ def play_game(mode, ia_std=None, ia_p1=None, ia_p2=None, nome_p1="Humano (X)", n
     num_moves = 0
     
     if mode == 2:
+        nome_ia = nome_p2
         print("\n--- Configuração de Partida ---")
         print("1. Ser Jogador 1 (X - Vermelho) [Começa]")
         print("2. Ser Jogador 2 (O - Amarelo) [IA começa]")
         if input("Escolha (1/2): ").strip() == "1":
             human_p = PLAYER1
             nome_p1 = "Humano (X)"
+            nome_p2 = f"{nome_ia} (O)"
         else:
             human_p = PLAYER2
+            nome_p1 = f"{nome_ia} (X)"
             nome_p2 = "Humano (O)"
 
     while True:
